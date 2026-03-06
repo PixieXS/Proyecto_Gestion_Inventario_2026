@@ -438,3 +438,101 @@ class DatabaseManager:
             return self.cursor.fetchall()
         except Error as e:
             print(e); return []
+        
+         # crud de productos: crear, eliminar, actualizar
+
+    def crear_producto(self, nombre, descripcion, cantidad, precio_unitario,
+                       proveedor, categoria='General', stock_minimo=5, id_proveedor=None):
+        try:
+            self.cursor.execute("""
+                INSERT INTO productos
+                (nombre,descripcion,cantidad,precio_unitario,proveedor,categoria,stock_minimo,id_proveedor)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (nombre, descripcion, cantidad, precio_unitario,
+                  proveedor, categoria, stock_minimo, id_proveedor or None))
+            self.connection.commit()
+            return True, "Producto creado exitosamente"
+        except Error as e:
+            return False, str(e)
+
+    def obtener_productos(self):
+        try:
+            self.ping_and_commit() 
+            self.cursor.execute("SELECT * FROM productos ORDER BY fecha_registro DESC")
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def buscar_productos(self, termino='', categoria=''):
+        try:
+            self.ping_and_commit()   
+            cond, params = [], []
+            if termino:
+                cond.append("(nombre LIKE %s OR proveedor LIKE %s)")
+                params += [f"%{termino}%", f"%{termino}%"]
+            if categoria and categoria != 'Todas':
+                cond.append("categoria=%s"); params.append(categoria)
+            where = ("WHERE " + " AND ".join(cond)) if cond else ""
+            self.cursor.execute(
+                f"SELECT * FROM productos {where} ORDER BY fecha_registro DESC", params)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def obtener_categorias(self):
+        try:
+            self.cursor.execute("SELECT DISTINCT categoria FROM productos ORDER BY categoria")
+            return [r['categoria'] for r in self.cursor.fetchall() if r['categoria']]
+        except Error as e:
+            print(e); return []
+
+    def obtener_producto(self, id_producto):
+        try:
+            self.cursor.execute("SELECT * FROM productos WHERE id=%s", (id_producto,))
+            return self.cursor.fetchone()
+        except Error as e:
+            print(e); return None
+
+    def actualizar_producto(self, id_producto, nombre, descripcion, cantidad,
+                            precio_unitario, proveedor, categoria='General',
+                            stock_minimo=5, id_proveedor=None):
+        try:
+            self.cursor.execute("""
+                UPDATE productos SET nombre=%s,descripcion=%s,cantidad=%s,precio_unitario=%s,
+                proveedor=%s,categoria=%s,stock_minimo=%s,id_proveedor=%s,
+                ultima_actualizacion=CURRENT_TIMESTAMP
+                WHERE id=%s
+            """, (nombre, descripcion, cantidad, precio_unitario, proveedor,
+                  categoria, stock_minimo, id_proveedor or None, id_producto))
+            self.connection.commit()
+            return True, "Producto actualizado exitosamente"
+        except Error as e:
+            return False, str(e)
+
+    def eliminar_producto(self, id_producto):
+        try:
+            self.cursor.execute(
+                "SELECT COUNT(*) AS n FROM movimientos WHERE id_producto=%s", (id_producto,))
+            n = self.cursor.fetchone()['n']
+            if n > 0:
+                return False, (f"No se puede eliminar: el producto tiene {n} "
+                               f"movimiento(s) registrado(s).\n"
+                               f"Archive o transfiera los movimientos primero.")
+            self.cursor.execute("DELETE FROM productos WHERE id=%s", (id_producto,))
+            self.connection.commit()
+            return True, "Producto eliminado exitosamente"
+        except Error as e:
+            return False, str(e)
+
+    def obtener_productos_criticos(self):
+        """Productos con cantidad <= stock_minimo."""
+        try:
+            self.cursor.execute("""
+                SELECT id, nombre, cantidad, stock_minimo, proveedor
+                FROM productos
+                WHERE cantidad <= stock_minimo
+                ORDER BY (cantidad - stock_minimo) ASC
+            """)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
