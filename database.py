@@ -88,3 +88,189 @@ class DatabaseManager:
                 self.connect()
             except Exception:
                 pass
+
+
+    # creacion de tablas en base de datos
+
+    def create_tables(self):
+        try:
+            # tabla roles
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS roles (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(50) NOT NULL UNIQUE,
+                    descripcion TEXT
+                )
+            """)
+            # tabla permisos
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS permisos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id_rol INT NOT NULL,
+                    permiso VARCHAR(100) NOT NULL,
+                    FOREIGN KEY (id_rol) REFERENCES roles(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_rol_permiso (id_rol, permiso)
+                )
+            """)
+            # tabla usuarios
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    username VARCHAR(100) NOT NULL UNIQUE,
+                    password_hash VARCHAR(64) NOT NULL,
+                    nombre_completo VARCHAR(255),
+                    id_rol INT NOT NULL,
+                    activo TINYINT DEFAULT 1,
+                    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_rol) REFERENCES roles(id)
+                )
+            """)
+            # tabla proveedores
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS proveedores (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(255) NOT NULL,
+                    telefono VARCHAR(50),
+                    correo VARCHAR(255),
+                    direccion TEXT,
+                    contacto VARCHAR(255),
+                    fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # tabla productos
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS productos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(255) NOT NULL,
+                    descripcion TEXT,
+                    cantidad INT NOT NULL DEFAULT 0,
+                    precio_unitario DECIMAL(10,2) NOT NULL,
+                    proveedor VARCHAR(255),
+                    id_proveedor INT DEFAULT NULL,
+                    categoria VARCHAR(100) DEFAULT 'General',
+                    stock_minimo INT DEFAULT 5,
+                    fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    ultima_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_proveedor) REFERENCES proveedores(id) ON DELETE SET NULL
+                )
+            """)
+            # tabla movimientos
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS movimientos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id_producto INT NOT NULL,
+                    tipo_movimiento VARCHAR(50),
+                    cantidad INT NOT NULL,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    descripcion TEXT,
+                    id_usuario INT DEFAULT NULL,
+                    FOREIGN KEY (id_producto) REFERENCES productos(id) ON DELETE CASCADE,
+                    FOREIGN KEY (id_usuario) REFERENCES usuarios(id) ON DELETE SET NULL
+                )
+            """)
+            # tabla de log de actividad
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS log_actividad (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id_usuario INT DEFAULT NULL,
+                    username VARCHAR(100),
+                    accion VARCHAR(255) NOT NULL,
+                    detalle TEXT,
+                    producto_afectado VARCHAR(255),
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (id_usuario) REFERENCES usuarios(id) ON DELETE SET NULL
+                )
+            """)
+            self.connection.commit()
+
+            # migrar para base creada
+            self._migrar_columnas()
+
+            # datos iniciales
+            self._seed_inicial()
+            return True
+        except Error as e:
+            if e.errno == 1050 or "already exists" in str(e):
+                print("[OK] Tablas ya existen, usando las existentes")
+                try:
+                    self._migrar_columnas()
+                    self._seed_inicial()
+                except Exception:
+                    pass
+                return True
+            print(f"[ERROR] Creando tablas: {e}")
+            return False
+        #aqui agregamos las columnas a las tablas
+    def _migrar_columnas(self):
+        """Agregar columnas nuevas a tablas existentes si no existen."""
+        migraciones = [
+            ("productos", "stock_minimo",  "ALTER TABLE productos ADD COLUMN stock_minimo INT DEFAULT 5"),
+            ("productos", "id_proveedor",  "ALTER TABLE productos ADD COLUMN id_proveedor INT DEFAULT NULL"),
+            ("productos", "categoria",     "ALTER TABLE productos ADD COLUMN categoria VARCHAR(100) DEFAULT 'General'"),
+            ("movimientos", "id_usuario",  "ALTER TABLE movimientos ADD COLUMN id_usuario INT DEFAULT NULL"),
+        ]
+        for tabla, columna, sql in migraciones:
+            try:
+                self.cursor.execute(f"SELECT {columna} FROM {tabla} LIMIT 1")
+                self.cursor.fetchall()
+            except Error:
+                try:
+                    self.cursor.execute(sql)
+                    self.connection.commit()
+                    print(f"[OK] Migración: {tabla}.{columna}")
+                except Error as e:
+                    print(f"[WARN] Migración {columna}: {e}")
+
+    def _seed_inicial(self):
+        """Insertar roles, permisos y usuario admin si la BD está vacía."""
+        self.cursor.execute("SELECT COUNT(*) AS n FROM roles")
+        if self.cursor.fetchone()['n'] > 0:
+            return
+
+        # roles
+        for nombre, desc in [
+            ('Administrador', 'Acceso total al sistema'),
+            ('Gerente',       'Reportes y análisis'),
+            ('Empleado',      'Registrar movimientos'),
+        ]:
+            self.cursor.execute(
+                "INSERT INTO roles (nombre, descripcion) VALUES (%s, %s)", (nombre, desc))
+        self.connection.commit()
+
+        # permisos para los roles
+        for rol_nombre, lista in PERMISOS_DEFAULT.items():
+            self.cursor.execute("SELECT id FROM roles WHERE nombre=%s", (rol_nombre,))
+            row = self.cursor.fetchone()
+            if not row:
+                continue
+            id_rol = row['id']
+            for p in lista:
+                try:
+                    self.cursor.execute(
+                        "INSERT IGNORE INTO permisos (id_rol, permiso) VALUES (%s,%s)", (id_rol, p))
+                except Error:
+                    pass
+        self.connection.commit()
+
+        # usuarios creados por defecto
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Administrador'")
+        id_admin = self.cursor.fetchone()['id']
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Gerente'")
+        id_gerente = self.cursor.fetchone()['id']
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Empleado'")
+        id_empleado = self.cursor.fetchone()['id']
+
+        for usr, pwd, rid, nombre in [
+            ('admin',    'admin123',    id_admin,    'Administrador'),
+            ('gerente',  'gerente123',  id_gerente,  'Gerente'),
+            ('empleado', 'empleado123', id_empleado, 'Empleado'),
+        ]:
+            try:
+                self.cursor.execute("""
+                    INSERT IGNORE INTO usuarios (username, password_hash, nombre_completo, id_rol)
+                    VALUES (%s, %s, %s, %s)
+                """, (usr, _hash(pwd), nombre, rid))
+            except Error:
+                pass
+        self.connection.commit()
+        print("[OK] Datos iniciales creados (admin/admin123)")
