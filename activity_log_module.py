@@ -34,3 +34,23 @@ class LogWindow:
         self.e_filtro.pack(side=tk.LEFT, padx=(0, 10))
         self.e_filtro.bind('<KeyRelease>', self._filtrar)
         ttk.Button(frm_f, text="🔄 Recargar", command=self._cargar).pack(side=tk.LEFT, padx=4)
+
+        # Agregando Tabla De Movimiento De Productos Por Usuario
+        frm = ttk.Frame(self.win)
+        frm.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        sb_y = ttk.Scrollbar(frm); sb_y.pack(side=tk.RIGHT, fill=tk.Y)
+        sb_x = ttk.Scrollbar(frm, orient=tk.HORIZONTAL); sb_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        cols = ('ID', 'Usuario', 'Acción', 'Detalle', 'Producto Afectado', 'Fecha')
+        self.tree = ttk.Treeview(frm, columns=cols, show='headings',
+                                  yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.config(command=self.tree.yview)
+        sb_x.config(command=self.tree.xview)
+
+        anchos = {'ID': 45, 'Usuario': 110, 'Acción': 180,
+                  'Detalle': 200, 'Producto Afectado': 160, 'Fecha': 150}
+        for c in cols:
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=anchos[c],
+                              anchor=tk.CENTER if c == 'ID' else tk.W)
