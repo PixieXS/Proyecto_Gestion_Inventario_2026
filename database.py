@@ -363,3 +363,78 @@ class DatabaseManager:
             return True, "Usuario eliminado"
         except Error as e:
             return False, str(e)
+        
+ # ── gestion de roles y permisos
+
+    def obtener_roles(self):
+        try:
+            self.cursor.execute("SELECT * FROM roles ORDER BY id")
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def obtener_permisos_rol(self, id_rol):
+        try:
+            self.cursor.execute("SELECT permiso FROM permisos WHERE id_rol=%s", (id_rol,))
+            return [r['permiso'] for r in self.cursor.fetchall()]
+        except Error as e:
+            print(e); return []
+
+    def actualizar_permisos_rol(self, id_rol, lista_permisos):
+        try:
+            self.cursor.execute("DELETE FROM permisos WHERE id_rol=%s", (id_rol,))
+            for p in lista_permisos:
+                self.cursor.execute(
+                    "INSERT IGNORE INTO permisos (id_rol, permiso) VALUES (%s,%s)", (id_rol, p))
+            self.connection.commit()
+            return True, "Permisos actualizados"
+        except Error as e:
+            return False, str(e)
+
+    # obtener provedores
+
+    def obtener_proveedores(self):
+        try:
+            self.ping_and_commit()
+            self.cursor.execute("SELECT * FROM proveedores ORDER BY nombre")
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def crear_proveedor(self, nombre, telefono, correo, direccion, contacto=''):
+        try:
+            self.cursor.execute("""
+                INSERT INTO proveedores (nombre, telefono, correo, direccion, contacto)
+                VALUES (%s,%s,%s,%s,%s)
+            """, (nombre, telefono, correo, direccion, contacto))
+            self.connection.commit()
+            return True, "Proveedor creado"
+        except Error as e:
+            return False, str(e)
+
+    def actualizar_proveedor(self, id_prov, nombre, telefono, correo, direccion, contacto=''):
+        try:
+            self.cursor.execute("""
+                UPDATE proveedores SET nombre=%s,telefono=%s,correo=%s,direccion=%s,contacto=%s
+                WHERE id=%s
+            """, (nombre, telefono, correo, direccion, contacto, id_prov))
+            self.connection.commit()
+            return True, "Proveedor actualizado"
+        except Error as e:
+            return False, str(e)
+
+    def eliminar_proveedor(self, id_prov):
+        try:
+            self.cursor.execute("DELETE FROM proveedores WHERE id=%s", (id_prov,))
+            self.connection.commit()
+            return True, "Proveedor eliminado"
+        except Error as e:
+            return False, str(e)
+
+    def obtener_productos_proveedor(self, id_prov):
+        try:
+            self.cursor.execute(
+                "SELECT id,nombre FROM productos WHERE id_proveedor=%s", (id_prov,))
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
