@@ -274,3 +274,92 @@ class DatabaseManager:
                 pass
         self.connection.commit()
         print("[OK] Datos iniciales creados (admin/admin123)")
+
+          # autenticacion de usuarios
+
+    def autenticar_usuario(self, username, password):
+        """Retorna dict con info del usuario o None si falla."""
+        try:
+            self.cursor.execute("""
+                SELECT u.id, u.username, u.nombre_completo, u.activo,
+                       r.id AS id_rol, r.nombre AS rol
+                FROM usuarios u
+                JOIN roles r ON u.id_rol = r.id
+                WHERE u.username = %s AND u.password_hash = %s
+            """, (username, _hash(password)))
+            usuario = self.cursor.fetchone()
+            if not usuario:
+                return None, "Usuario o contraseña incorrectos"
+            if not usuario['activo']:
+                return None, "Usuario desactivado. Contacte al administrador."
+
+            # permisos de los usuarios
+            self.cursor.execute(
+                "SELECT permiso FROM permisos WHERE id_rol = %s", (usuario['id_rol'],))
+            permisos = [r['permiso'] for r in self.cursor.fetchall()]
+            usuario['permisos'] = permisos
+            return usuario, None
+        except Error as e:
+            return None, str(e)
+
+    def tiene_permiso(self, usuario, permiso):
+        permisos = usuario.get('permisos', [])
+        return 'all' in permisos or permiso in permisos
+
+    # gestionamos usuarios
+
+    def obtener_usuarios(self):
+        try:
+            self.cursor.execute("""
+                SELECT u.id, u.username, u.nombre_completo, u.activo,
+                       r.nombre AS rol, u.fecha_creacion
+                FROM usuarios u JOIN roles r ON u.id_rol = r.id
+                ORDER BY u.id
+            """)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def crear_usuario(self, username, password, nombre_completo, id_rol):
+        try:
+            self.cursor.execute("""
+                INSERT INTO usuarios (username, password_hash, nombre_completo, id_rol)
+                VALUES (%s, %s, %s, %s)
+            """, (username, _hash(password), nombre_completo, id_rol))
+            self.connection.commit()
+            return True, "Usuario creado"
+        except Error as e:
+            return False, str(e)
+
+    def actualizar_usuario(self, id_usuario, nombre_completo, id_rol, activo):
+        try:
+            self.cursor.execute("""
+                UPDATE usuarios SET nombre_completo=%s, id_rol=%s, activo=%s WHERE id=%s
+            """, (nombre_completo, id_rol, activo, id_usuario))
+            self.connection.commit()
+            return True, "Usuario actualizado"
+        except Error as e:
+            return False, str(e)
+
+    def cambiar_password(self, id_usuario, password_actual, password_nueva):
+        try:
+            self.cursor.execute(
+                "SELECT id FROM usuarios WHERE id=%s AND password_hash=%s",
+                (id_usuario, _hash(password_actual)))
+            if not self.cursor.fetchone():
+                return False, "Contraseña actual incorrecta"
+            self.cursor.execute(
+                "UPDATE usuarios SET password_hash=%s WHERE id=%s",
+                (_hash(password_nueva), id_usuario))
+            self.connection.commit()
+            return True, "Contraseña actualizada"
+        except Error as e:
+            return False, str(e)
+
+    def eliminar_usuario(self, id_usuario):
+        try:
+            self.cursor.execute("DELETE FROM usuarios WHERE id=%s", (id_usuario,))
+            self.connection.commit()
+            return True, "Usuario eliminado"
+        except Error as e:
+            return False, str(e)
