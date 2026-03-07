@@ -631,3 +631,68 @@ class DatabaseManager:
             return stats
         except Error as e:
             print(e); return {}
+
+        # log de productos 
+
+    def registrar_log(self, id_usuario, username, accion, detalle='', producto_afectado=''):
+        try:
+            self.cursor.execute("""
+                INSERT INTO log_actividad
+                (id_usuario,username,accion,detalle,producto_afectado)
+                VALUES (%s,%s,%s,%s,%s)
+            """, (id_usuario, username, accion, detalle, producto_afectado))
+            self.connection.commit()
+        except Error as e:
+            print(f"[WARN] Log: {e}")
+
+    def obtener_log(self, limite=500):
+        try:
+            self.cursor.execute("""
+                SELECT id, username, accion, detalle, producto_afectado, fecha
+                FROM log_actividad
+                ORDER BY fecha DESC
+                LIMIT %s
+            """, (limite,))
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    # crear backup de la base solo admins
+
+    def backup_base_datos(self, ruta_destino):
+        """Genera un archivo SQL con todos los datos."""
+        try:
+            tablas = ['roles', 'permisos', 'usuarios', 'proveedores',
+                      'productos', 'movimientos', 'log_actividad']
+            lines = [
+                f"-- Backup generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+                "SET FOREIGN_KEY_CHECKS=0;\n\n",
+            ]
+            for tabla in tablas:
+                self.cursor.execute(f"SELECT * FROM {tabla}")
+                rows = self.cursor.fetchall()
+                if not rows:
+                    continue
+                cols = list(rows[0].keys())
+                cols_str = ', '.join(f"`{c}`" for c in cols)
+                lines.append(f"-- Tabla: {tabla}\n")
+                for row in rows:
+                    vals = []
+                    for v in row.values():
+                        if v is None:
+                            vals.append("NULL")
+                        elif isinstance(v, (int, float)):
+                            vals.append(str(v))
+                        elif isinstance(v, datetime):
+                            vals.append(f"'{v.strftime('%Y-%m-%d %H:%M:%S')}'")
+                        else:
+                            vals.append("'" + str(v).replace("'", "''") + "'")
+                    lines.append(
+                        f"INSERT IGNORE INTO `{tabla}` ({cols_str}) VALUES ({', '.join(vals)});\n")
+                lines.append("\n")
+            lines.append("SET FOREIGN_KEY_CHECKS=1;\n")
+            with open(ruta_destino, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            return True, ruta_destino
+        except Exception as e:
+            return False, str(e)
