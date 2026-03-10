@@ -8,5 +8,5 @@ DB_CONFIG = {
     'raise_on_warnings': True
 }
 
-# Ruta para guardar reportes
+# Ruta para guardar los reportes
 REPORTS_PATH = './reportes/'

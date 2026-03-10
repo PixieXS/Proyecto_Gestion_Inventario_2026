@@ -149,6 +149,7 @@ class ExcelExporter:
         except Exception as err:
             return False, f"Error al exportar movimientos: {str(err)}"
     
+    #se exporta el nombre completo
     def exportar_completo(self, productos, movimientos, productos_dict):
         try:
             wb = openpyxl.Workbook()

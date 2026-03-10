@@ -132,7 +132,7 @@ class ExcelAnalyzer:
         messagebox.showinfo("Exito", f"Archivo cargado exitosamente.\n{len(self.df)} filas, {len(self.df.columns)} columnas.")
 
     def populate_preview(self):
-        # Validar que tree exista
+        # Validar que la tree exista 
         if self.tree is None:
             print("[ERROR] Tree widget no inicializado")
             return
