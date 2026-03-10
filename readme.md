@@ -1,4 +1,4 @@
-# 📦 Sistema de Gestión de Inventario STS
+# 📦 Sistema de Gestión de Inventario
 
 Sistema de escritorio para la gestión de inventario de productos, desarrollado en Python con interfaz gráfica Tkinter y base de datos MySQL.
 
@@ -51,8 +51,8 @@ Sistema de escritorio para la gestión de inventario de productos, desarrollado 
 
 **1. Clonar el repositorio**
 ```bash
-git clone https://github.com/tu-usuario/sistema-inventario-sts.git
-cd sistema-inventario-sts
+git clone https://github.com/PixieXS/Proyecto_Gestion_Inventario_2026/
+cd Proyecto_Gestion_Inventario_2026
 ```
 
 **2. Instalar dependencias**
