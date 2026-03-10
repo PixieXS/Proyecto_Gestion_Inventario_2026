@@ -139,13 +139,13 @@ class ExcelAnalyzer:
         self.window.focus_force()
 
     def populate_preview(self):
-<<<<<<< HEAD
+
         # Validar que la tree exista 
         if self.tree is None:
             print("[ERROR] Tree widget no inicializado")
-=======
+
         if self.tree is None or self.df is None or self.df.empty:
->>>>>>> 9eededa990b5b637ae9b5f7082de16f9e32b6a31
+
             return
 
         self.tree.delete(*self.tree.get_children())
