@@ -9,9 +9,6 @@ DB_CONFIG = {
     'raise_on_warnings': False   
 }
 
-<<<<<<< HEAD
 # Ruta para guardar los reportes
-=======
 # Ruta Por Defecto Para Guardar Los Reportes
->>>>>>> 9eededa990b5b637ae9b5f7082de16f9e32b6a31
 REPORTS_PATH = './reportes/'
