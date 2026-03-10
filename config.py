@@ -10,5 +10,4 @@ DB_CONFIG = {
 }
 
 # Ruta para guardar los reportes
-# Ruta Por Defecto Para Guardar Los Reportes
 REPORTS_PATH = './reportes/'
