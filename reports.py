@@ -1,171 +1,152 @@
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter, A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.units import inch, cm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from datetime import datetime
 import os
 from config import REPORTS_PATH
 
+
 class ReportGenerator:
-    """Generador de reportes en PDF"""
-    
     def __init__(self):
         if not os.path.exists(REPORTS_PATH):
             os.makedirs(REPORTS_PATH)
         self.styles = getSampleStyleSheet()
-    
+        self.cell_style = ParagraphStyle(
+            'Cell', parent=self.styles['Normal'], fontSize=8, leading=10, wordWrap='CJK')
+        self.hdr_style = ParagraphStyle(
+            'Hdr', parent=self.styles['Normal'], fontSize=9, leading=11,
+            textColor=colors.whitesmoke, fontName='Helvetica-Bold')
+
+    def _p(self, txt):
+        return Paragraph(str(txt) if txt is not None else '', self.cell_style)
+
+    def _ph(self, txt):
+        return Paragraph(str(txt), self.hdr_style)
+
+    def _doc_landscape(self, filename):
+        return SimpleDocTemplate(filename, pagesize=landscape(A4),
+                                 leftMargin=1.5*cm, rightMargin=1.5*cm,
+                                 topMargin=2*cm, bottomMargin=2*cm)
+
+    def _titulo_style(self):
+        return ParagraphStyle('T', parent=self.styles['Heading1'],
+                              fontSize=20, textColor=colors.HexColor('#1f4788'),
+                              spaceAfter=16, alignment=1)
+
+    def _table_style(self):
+        return TableStyle([
+            ('BACKGROUND',  (0, 0), (-1, 0),  colors.HexColor('#1f4788')),
+            ('TEXTCOLOR',   (0, 0), (-1, 0),  colors.whitesmoke),
+            ('ALIGN',       (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN',      (0, 0), (-1, -1), 'TOP'),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0f4ff')]),
+            ('GRID',        (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING',(0, 0), (-1, -1), 4),
+            ('TOPPADDING',  (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING',(0,0), (-1, -1), 4),
+        ])
+
+    # ── Inventario ────────────────────────────────────────────────────────────
+
     def generar_reporte_inventario(self, productos):
-        """Generar reporte de inventario"""
         try:
-            filename = f"{REPORTS_PATH}Inventario_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            doc = SimpleDocTemplate(filename, pagesize=letter)
-            elements = []
-            
-            # Título
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=self.styles['Heading1'],
-                fontSize=24,
-                textColor=colors.HexColor('#1f4788'),
-                spaceAfter=30,
-                alignment=1
-            )
-            elements.append(Paragraph("REPORTE DE INVENTARIO", title_style))
-            elements.append(Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", self.styles['Normal']))
-            elements.append(Spacer(1, 0.3*inch))
-            
-            # Tabla de datos
-            table_data = [['ID', 'Producto', 'Descripción', 'Cantidad', 'Precio Unitario', 'Proveedor']]
-            
-            for producto in productos:
-                table_data.append([
-                    str(producto['id']),
-                    producto['nombre'],
-                    producto['descripcion'][:30] if producto['descripcion'] else '',
-                    str(producto['cantidad']),
-                    f"${float(producto['precio_unitario']):.2f}",
-                    producto['proveedor'] if producto['proveedor'] else 'N/A'
-                ])
-            
-            table = Table(table_data, colWidths=[0.5*inch, 1.5*inch, 1.5*inch, 0.8*inch, 1.2*inch, 1.2*inch])
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')])
-            ]))
-            
-            elements.append(table)
-            
-            # Crear PDF
-            doc.build(elements)
-            return True, f"Reporte guardado en: {filename}"
-        except Exception as e:
-            return False, f"Error al generar reporte: {e}"
-    
-    def generar_reporte_movimientos(self, movimientos, productos_dict):
-        """Generar reporte de movimientos de inventario"""
-        try:
-            filename = f"{REPORTS_PATH}Movimientos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            doc = SimpleDocTemplate(filename, pagesize=letter)
-            elements = []
-            
-            # Título
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=self.styles['Heading1'],
-                fontSize=24,
-                textColor=colors.HexColor('#1f4788'),
-                spaceAfter=30,
-                alignment=1
-            )
-            elements.append(Paragraph("REPORTE DE MOVIMIENTOS", title_style))
-            elements.append(Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", self.styles['Normal']))
-            elements.append(Spacer(1, 0.3*inch))
-            
-            # Tabla de datos
-            table_data = [['ID Mov', 'Producto', 'Tipo', 'Cantidad', 'Fecha', 'Descripción']]
-            
-            for movimiento in movimientos:
-                producto_nombre = productos_dict.get(movimiento['id_producto'], {}).get('nombre', 'N/A')
-                table_data.append([
-                    str(movimiento['id']),
-                    producto_nombre,
-                    movimiento['tipo_movimiento'],
-                    str(movimiento['cantidad']),
-                    movimiento['fecha'].strftime('%d/%m/%Y %H:%M') if movimiento['fecha'] else '',
-                    movimiento['descripcion'][:20] if movimiento['descripcion'] else ''
-                ])
-            
-            table = Table(table_data, colWidths=[0.6*inch, 1.8*inch, 1*inch, 1*inch, 1.2*inch, 1.2*inch])
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')])
-            ]))
-            
-            elements.append(table)
-            doc.build(elements)
-            return True, f"Reporte guardado en: {filename}"
-        except Exception as e:
-            return False, f"Error al generar reporte: {e}"
-    
-    def generar_reporte_estadisticas(self, estadisticas):
-        """Generar reporte de estadísticas"""
-        try:
-            filename = f"{REPORTS_PATH}Estadisticas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            doc = SimpleDocTemplate(filename, pagesize=letter)
-            elements = []
-            
-            # Título
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=self.styles['Heading1'],
-                fontSize=24,
-                textColor=colors.HexColor('#1f4788'),
-                spaceAfter=30,
-                alignment=1
-            )
-            elements.append(Paragraph("REPORTE DE ESTADÍSTICAS", title_style))
-            elements.append(Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", self.styles['Normal']))
-            elements.append(Spacer(1, 0.3*inch))
-            
-            # Tabla de estadísticas
-            table_data = [
-                ['Métrica', 'Valor'],
-                ['Total de Productos', str(estadisticas.get('total_productos', 0))],
-                ['Stock Total (Unidades)', str(estadisticas.get('stock_total', 0))],
-                ['Valor Total Inventario', f"${estadisticas.get('valor_total', 0):.2f}"],
-                ['Productos con Stock Bajo', str(estadisticas.get('bajo_stock', 0))]
+            fn = f"{REPORTS_PATH}Inventario_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            doc = self._doc_landscape(fn)
+            els = [
+                Paragraph("REPORTE DE INVENTARIO", self._titulo_style()),
+                Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                          self.styles['Normal']),
+                Spacer(1, 0.25*inch),
             ]
-            
-            table = Table(table_data, colWidths=[3*inch, 2*inch])
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')])
-            ]))
-            
-            elements.append(table)
-            doc.build(elements)
-            return True, f"Reporte guardado en: {filename}"
+            data = [[self._ph(h) for h in
+                     ['ID','Producto','Descripción','Categoría','Cantidad',
+                      'Stock Mín','Precio Unit.','Proveedor']]]
+            for p in productos:
+                desc = (p.get('descripcion') or '')[:80]
+                data.append([
+                    self._p(p['id']), self._p(p['nombre']), self._p(desc),
+                    self._p(p.get('categoria','General')), self._p(p['cantidad']),
+                    self._p(p.get('stock_minimo', 5)),
+                    self._p(f"${float(p['precio_unitario']):.2f}"),
+                    self._p(p.get('proveedor') or 'N/A'),
+                ])
+            cols = [1.0*cm, 4.8*cm, 5.5*cm, 3*cm, 1.8*cm, 1.8*cm, 2.5*cm, 4*cm]
+            t = Table(data, colWidths=cols, repeatRows=1)
+            t.setStyle(self._table_style())
+            els.append(t)
+            doc.build(els)
+            return True, f"Guardado en: {fn}"
         except Exception as e:
-            return False, f"Error al generar reporte: {e}"
+            return False, str(e)
+
+    # ── Movimientos ───────────────────────────────────────────────────────────
+
+    def generar_reporte_movimientos(self, movimientos, productos_dict, titulo=None):
+        try:
+            fn = f"{REPORTS_PATH}Movimientos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            doc = self._doc_landscape(fn)
+            titulo = titulo or "REPORTE DE MOVIMIENTOS"
+            els = [
+                Paragraph(titulo.upper(), self._titulo_style()),
+                Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                          self.styles['Normal']),
+                Spacer(1, 0.25*inch),
+            ]
+            data = [[self._ph(h) for h in
+                     ['ID','Producto','Tipo','Cantidad','Fecha','Usuario','Descripción']]]
+            for m in movimientos:
+                prod = productos_dict.get(m['id_producto'], {})
+                prod_nombre = (m.get('nombre_producto')
+                               or (prod.get('nombre') if prod else 'N/A'))
+                usuario = m.get('usuario_nombre') or m.get('usuario') or 'Sistema'
+                desc = (m.get('descripcion') or '')[:50]
+                data.append([
+                    self._p(m['id']), self._p(prod_nombre),
+                    self._p(m.get('tipo_movimiento','')), self._p(m['cantidad']),
+                    self._p(m['fecha'].strftime('%d/%m/%Y %H:%M') if m.get('fecha') else ''),
+                    self._p(usuario), self._p(desc),
+                ])
+            cols = [1.2*cm, 5*cm, 2.5*cm, 2*cm, 3.5*cm, 3*cm, 6.5*cm]
+            t = Table(data, colWidths=cols, repeatRows=1)
+            t.setStyle(self._table_style())
+            els.append(t)
+            doc.build(els)
+            return True, f"Guardado en: {fn}"
+        except Exception as e:
+            return False, str(e)
+
+    # ── Estadísticas ──────────────────────────────────────────────────────────
+
+    def generar_reporte_estadisticas(self, estadisticas):
+        try:
+            fn = f"{REPORTS_PATH}Estadisticas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            doc = SimpleDocTemplate(fn, pagesize=letter)
+            els = [
+                Paragraph("REPORTE DE ESTADÍSTICAS", self._titulo_style()),
+                Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                          self.styles['Normal']),
+                Spacer(1, 0.3*inch),
+            ]
+            data = [
+                [self._ph('Métrica'), self._ph('Valor')],
+                [self._p('Total de Productos'),
+                 self._p(estadisticas.get('total_productos', 0))],
+                [self._p('Stock Total (Unidades)'),
+                 self._p(estadisticas.get('stock_total', 0))],
+                [self._p('Valor Total Inventario'),
+                 self._p(f"${estadisticas.get('valor_total', 0):.2f}")],
+                [self._p('Productos con Stock Bajo/Crítico'),
+                 self._p(estadisticas.get('bajo_stock', 0))],
+                [self._p('Total de Proveedores'),
+                 self._p(estadisticas.get('total_proveedores', 0))],
+            ]
+            t = Table(data, colWidths=[9*cm, 5*cm])
+            t.setStyle(self._table_style())
+            els.append(t)
+            doc.build(els)
+            return True, f"Guardado en: {fn}"
+        except Exception as e:
+            return False, str(e)
