@@ -199,3 +199,40 @@ class Conexion:
                 return True
             print(f"[ERROR] Creando tablas: {e}")
             return False
+
+    def _migrar_columnas(self):
+        migraciones = [
+            ("productos",   "stock_minimo", "ALTER TABLE productos ADD COLUMN stock_minimo INT DEFAULT 5"),
+            ("productos",   "id_proveedor", "ALTER TABLE productos ADD COLUMN id_proveedor INT DEFAULT NULL"),
+            ("productos",   "categoria",    "ALTER TABLE productos ADD COLUMN categoria VARCHAR(100) DEFAULT 'General'"),
+            ("productos",   "activo",       "ALTER TABLE productos ADD COLUMN activo TINYINT DEFAULT 1"),
+            ("movimientos", "id_usuario",   "ALTER TABLE movimientos ADD COLUMN id_usuario INT DEFAULT NULL"),
+            ("categorias",  "activa",       "ALTER TABLE categorias ADD COLUMN activa TINYINT DEFAULT 1"),
+            ("proveedores", "activo",       "ALTER TABLE proveedores ADD COLUMN activo TINYINT DEFAULT 1"),
+            ("productos",   "codigo",       "ALTER TABLE productos ADD COLUMN codigo VARCHAR(100) DEFAULT NULL"),
+            ("productos",   "imagen_path",  "ALTER TABLE productos ADD COLUMN imagen_path VARCHAR(500) DEFAULT NULL"),
+            ("productos",   "unidad_medida","ALTER TABLE productos ADD COLUMN unidad_medida VARCHAR(50) DEFAULT 'Unidad'"),
+            ("productos",   "stock_maximo", "ALTER TABLE productos ADD COLUMN stock_maximo INT DEFAULT NULL"),
+            ("productos",   "precio_compra","ALTER TABLE productos ADD COLUMN precio_compra DECIMAL(10,2) DEFAULT NULL"),
+            ("proveedores", "ruc_nit",      "ALTER TABLE proveedores ADD COLUMN ruc_nit VARCHAR(50) DEFAULT NULL"),
+            ("usuarios",    "ultimo_login", "ALTER TABLE usuarios ADD COLUMN ultimo_login DATETIME DEFAULT NULL"),
+        ]
+        for tabla, columna, sql in migraciones:
+            try:
+                self.cursor.execute(f"SELECT {columna} FROM {tabla} LIMIT 1")
+                self.cursor.fetchall()
+            except Error:
+                try:
+                    self.cursor.execute(sql)
+                    self.connection.commit()
+                    print(f"[OK] Migración: {tabla}.{columna}")
+                except Error as e:
+                    print(f"[WARN] Migración {columna}: {e}")
+
+    def _ajustar_hash_password(self):
+        try:
+            self.cursor.execute(
+                "ALTER TABLE usuarios MODIFY COLUMN password_hash VARCHAR(255) NOT NULL")
+            self.connection.commit()
+        except Error as e:
+            print(f"[WARN] Migración password_hash: {e}")
