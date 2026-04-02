@@ -236,3 +236,58 @@ class Conexion:
             self.connection.commit()
         except Error as e:
             print(f"[WARN] Migración password_hash: {e}")
+
+    def _seed_inicial(self):
+        from .usuarios import _hash
+        self.cursor.execute("SELECT COUNT(*) AS n FROM roles")
+        if self.cursor.fetchone()['n'] > 0:
+            return
+        for nombre, desc in [
+            ('Administrador', 'Acceso total al sistema'),
+            ('Gerente',       'Reportes y análisis'),
+            ('Empleado',      'Registrar movimientos'),
+        ]:
+            self.cursor.execute(
+                "INSERT INTO roles (nombre, descripcion) VALUES (%s, %s)", (nombre, desc))
+        self.connection.commit()
+        for rol_nombre, lista in PERMISOS_DEFAULT.items():
+            self.cursor.execute("SELECT id FROM roles WHERE nombre=%s", (rol_nombre,))
+            row = self.cursor.fetchone()
+            if not row:
+                continue
+            for p in lista:
+                try:
+                    self.cursor.execute(
+                        "INSERT IGNORE INTO permisos (id_rol,permiso) VALUES (%s,%s)", (row['id'], p))
+                except Error:
+                    pass
+        self.connection.commit()
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Administrador'"); id_a = self.cursor.fetchone()['id']
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Gerente'");      id_g = self.cursor.fetchone()['id']
+        self.cursor.execute("SELECT id FROM roles WHERE nombre='Empleado'");     id_e = self.cursor.fetchone()['id']
+        for usr, pwd, rid, nombre in [
+            ('admin',    'admin123',    id_a, 'Administrador'),
+            ('gerente',  'gerente123',  id_g, 'Gerente'),
+            ('empleado', 'empleado123', id_e, 'Empleado'),
+        ]:
+            try:
+                self.cursor.execute(
+                    "INSERT IGNORE INTO usuarios (username,password_hash,nombre_completo,id_rol) VALUES (%s,%s,%s,%s)",
+                    (usr, _hash(pwd), nombre, rid))
+            except Error:
+                pass
+        self.connection.commit()
+        print("[OK] Datos iniciales creados. Cambie las contraseñas iniciales tras el primer acceso.")
+        # Seed configuracion por defecto
+        defaults = [
+            ('empresa_nombre', 'Mi Empresa'),
+            ('empresa_logo',   ''),
+        ]
+        for clave, valor in defaults:
+            try:
+                self.cursor.execute(
+                    "INSERT IGNORE INTO configuracion_sistema (clave, valor) VALUES (%s, %s)",
+                    (clave, valor))
+            except Exception:
+                pass
+        self.connection.commit()
