@@ -171,6 +171,8 @@ class ProductosMixin:
             return True, "Producto actualizado exitosamente"
         except Error as e:
             return False, str(e)
+        
+        #-- Estado De Productos Y Estadisticas
 
     def inhabilitar_producto(self, id_producto):
         try:
@@ -249,4 +251,84 @@ class ProductosMixin:
         except Error as e:
             print(e); return {}
         
-    
+        #-- Historial De Precios Y Reportes Por Proveedor
+         
+    def registrar_cambio_precio(self, id_producto, precio_anterior, precio_nuevo,
+                                 id_usuario, username):
+        """Guarda en historial cuando el precio de un producto cambia."""
+        try:
+            if float(precio_anterior) == float(precio_nuevo):
+                return  # sin cambio, no registrar
+            self.cursor.execute("""
+                INSERT INTO historial_precios
+                (id_producto, precio_anterior, precio_nuevo, id_usuario, username)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (id_producto, precio_anterior, precio_nuevo, id_usuario, username))
+            self.connection.commit()
+        except Exception as e:
+            print(f"[WARN] historial_precios: {e}")
+
+    def obtener_historial_precios(self, id_producto):
+        """Retorna el historial de cambios de precio de un producto."""
+        try:
+            self.cursor.execute("""
+                SELECT hp.precio_anterior, hp.precio_nuevo,
+                       hp.username, hp.fecha,
+                       (hp.precio_nuevo - hp.precio_anterior) AS diferencia
+                FROM historial_precios hp
+                WHERE hp.id_producto = %s
+                ORDER BY hp.fecha DESC
+            """, (id_producto,))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(e); return []
+
+    def reporte_por_proveedor(self, id_proveedor=None):
+        """Retorna resumen de productos agrupados por proveedor con totales."""
+        try:
+            if id_proveedor:
+                self.cursor.execute("""
+                    SELECT p.nombre AS proveedor,
+                           pr.ruc_nit, pr.telefono, pr.correo,
+                           COUNT(prod.id) AS total_productos,
+                           SUM(prod.cantidad) AS stock_total,
+                           SUM(prod.cantidad * prod.precio_unitario) AS valor_total,
+                           SUM(CASE WHEN prod.cantidad <= prod.stock_minimo THEN 1 ELSE 0 END) AS criticos
+                    FROM proveedores p
+                    LEFT JOIN productos prod ON prod.id_proveedor = p.id AND prod.activo=1
+                    WHERE p.id = %s
+                    GROUP BY p.id
+                """, (id_proveedor,))
+            else:
+                self.cursor.execute("""
+                    SELECT p.nombre AS proveedor,
+                           p.id AS id_proveedor,
+                           p.ruc_nit, p.telefono, p.correo,
+                           COUNT(prod.id) AS total_productos,
+                           COALESCE(SUM(prod.cantidad), 0) AS stock_total,
+                           COALESCE(SUM(prod.cantidad * prod.precio_unitario), 0) AS valor_total,
+                           SUM(CASE WHEN prod.cantidad <= prod.stock_minimo THEN 1 ELSE 0 END) AS criticos
+                    FROM proveedores p
+                    LEFT JOIN productos prod ON prod.id_proveedor = p.id AND prod.activo=1
+                    WHERE p.activo=1
+                    GROUP BY p.id
+                    ORDER BY valor_total DESC
+                """)
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(e); return []
+
+    def obtener_productos_detalle_proveedor(self, id_proveedor):
+        """Lista de productos de un proveedor específico con todos los datos."""
+        try:
+            self.cursor.execute("""
+                SELECT nombre, codigo, cantidad, stock_minimo, stock_maximo,
+                       precio_unitario, categoria, unidad_medida,
+                       (cantidad * precio_unitario) AS valor_total
+                FROM productos
+                WHERE id_proveedor=%s AND activo=1
+                ORDER BY nombre
+            """, (id_proveedor,))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(e); return []
