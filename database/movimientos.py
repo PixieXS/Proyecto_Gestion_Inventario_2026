@@ -89,3 +89,60 @@ class MovimientosMixin:
             return self.cursor.fetchall()
         except Error as e:
             print(e); return []
+
+    def obtener_movimientos_rango(self, fecha_inicio, fecha_fin,
+                                  categoria='', id_proveedor=None, tipo=''):
+        try:
+            cond = ["DATE(m.fecha) BETWEEN %s AND %s"]
+            params = [fecha_inicio, fecha_fin]
+            if categoria and categoria != 'Todas':
+                cond.append("p.categoria = %s"); params.append(categoria)
+            if id_proveedor:
+                cond.append("p.id_proveedor = %s"); params.append(id_proveedor)
+            if tipo and tipo != 'Todos':
+                cond.append("m.tipo_movimiento = %s"); params.append(tipo)
+            self.cursor.execute(f"""
+                SELECT m.*, p.nombre AS nombre_producto,
+                       p.categoria AS categoria_producto,
+                       u.username AS usuario_nombre
+                FROM movimientos m
+                JOIN productos p ON m.id_producto = p.id
+                LEFT JOIN usuarios u ON m.id_usuario = u.id
+                WHERE {' AND '.join(cond)}
+                ORDER BY m.fecha DESC
+            """, params)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def buscar_movimientos(self, termino='', tipo='', categoria='', fecha_desde='', fecha_hasta=''):
+        """Búsqueda en tiempo real de movimientos con múltiples filtros."""
+        try:
+            cond, params = [], []
+            if termino:
+                cond.append("(p.nombre LIKE %s OR m.descripcion LIKE %s)")
+                params += [f"%{termino}%", f"%{termino}%"]
+            if tipo and tipo != 'Todos':
+                cond.append("m.tipo_movimiento = %s"); params.append(tipo)
+            if categoria and categoria != 'Todas':
+                cond.append("p.categoria = %s"); params.append(categoria)
+            if fecha_desde:
+                cond.append("DATE(m.fecha) >= %s"); params.append(fecha_desde)
+            if fecha_hasta:
+                cond.append("DATE(m.fecha) <= %s"); params.append(fecha_hasta)
+            where = ("WHERE " + " AND ".join(cond)) if cond else ""
+            self.cursor.execute(f"""
+                SELECT m.*, p.nombre AS nombre_producto,
+                       p.categoria AS categoria_producto,
+                       u.username AS usuario_nombre
+                FROM movimientos m
+                JOIN productos p ON m.id_producto = p.id
+                LEFT JOIN usuarios u ON m.id_usuario = u.id
+                {where}
+                ORDER BY m.fecha DESC
+                LIMIT 500
+            """, params)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
