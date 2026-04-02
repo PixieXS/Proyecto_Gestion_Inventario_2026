@@ -534,14 +534,4 @@ class ReportesMixin:
 
         return contexto
 
-    def _base_reporte(self, tipo, titulo, subtitulo, columnas, filas, formatos=None, resumen=None):
-        return {
-            "tipo": tipo,
-            "titulo": titulo,
-            "subtitulo": subtitulo,
-            "columnas": columnas,
-            "filas": filas,
-            "formatos": formatos or {},
-            "resumen": resumen or {},
-            "nombre_archivo": _slug(titulo),
-        }
+   
