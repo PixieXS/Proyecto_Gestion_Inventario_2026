@@ -45,11 +45,7 @@ def configurar_ventana(
         center=True,
         resizable=None,
         start_maximized=False):
-    """
-    Configura tamanio inicial, minimo y centrado para cualquier ventana Tk/Toplevel.
 
-    `size` puede ser: main, xl, large, medium, small o dialog.
-    """
     preset = WINDOW_SIZE_PRESETS.get(size, WINDOW_SIZE_PRESETS["medium"])
     screen_w, screen_h = _screen_size(win)
     available_w = max(screen_w - pad_x, 360)
@@ -100,9 +96,6 @@ def ajustar_ventana_a_contenido(
         pad_x=32,
         pad_y=72,
         center=True):
-    """
-    Agranda la ventana si el contenido inicial requiere mas espacio, sin salir de la pantalla.
-    """
     try:
         win.update_idletasks()
     except Exception:
@@ -126,7 +119,6 @@ def ajustar_ventana_a_contenido(
 
 
 def bloquear_columnas(tree):
-    """Impide mover o redimensionar encabezados del Treeview."""
     tree.bind(
         "<Button-1>",
         lambda e: "break" if tree.identify_region(e.x, e.y) == "separator" else None)
@@ -143,7 +135,6 @@ def pedir_confirmacion_password(
         bg="#F1F5F9", title_fg="#1E293B", prompt_text="Contrasena:",
         button_style="Delete.TButton", confirm_text="Confirmar",
         cancel_text="Cancelar", geometry="360x200", wraplength=320):
-    """Dialogo reutilizable para confirmar acciones con la contrasena actual."""
     resultado = [False]
 
     win = tk.Toplevel(master)
