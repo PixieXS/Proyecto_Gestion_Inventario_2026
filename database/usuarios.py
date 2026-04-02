@@ -195,3 +195,45 @@ class UsuariosMixin:
             return self.cursor.fetchall()
         except Error as e:
             print(e); return []
+
+    # ── Roles y permisos ──────────────────────────────────────────────────────
+
+    def obtener_roles(self):
+        try:
+            self.cursor.execute("SELECT * FROM roles ORDER BY id")
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def obtener_permisos_rol(self, id_rol):
+        try:
+            self.cursor.execute("SELECT permiso FROM permisos WHERE id_rol=%s", (id_rol,))
+            return [r['permiso'] for r in self.cursor.fetchall()]
+        except Error as e:
+            print(e); return []
+
+    def actualizar_permisos_rol(self, id_rol, lista_permisos):
+        try:
+            self.cursor.execute("DELETE FROM permisos WHERE id_rol=%s", (id_rol,))
+            for p in lista_permisos:
+                self.cursor.execute(
+                    "INSERT IGNORE INTO permisos (id_rol, permiso) VALUES (%s,%s)", (id_rol, p))
+            self.connection.commit()
+            return True, "Permisos actualizados"
+        except Error as e:
+            return False, str(e)
+
+    def eliminar_rol(self, id_rol):
+        try:
+            self.cursor.execute(
+                "SELECT COUNT(*) AS n FROM usuarios WHERE id_rol=%s", (id_rol,))
+            asignados = self.cursor.fetchone()['n']
+            if asignados > 0:
+                return False, (
+                    f"No se puede eliminar el rol porque tiene {asignados} usuario(s) asignado(s).\n"
+                    "Reasigne esos usuarios a otro rol primero.")
+            self.cursor.execute("DELETE FROM roles WHERE id=%s", (id_rol,))
+            self.connection.commit()
+            return True, "Rol eliminado"
+        except Error as e:
+            return False, str(e)
