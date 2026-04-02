@@ -172,4 +172,81 @@ class ProductosMixin:
         except Error as e:
             return False, str(e)
 
-   
+    def inhabilitar_producto(self, id_producto):
+        try:
+            self.cursor.execute(
+                "SELECT cantidad, nombre FROM productos WHERE id=%s", (id_producto,))
+            row = self.cursor.fetchone()
+            if not row:
+                return False, "Producto no encontrado"
+            if row['cantidad'] > 0:
+                return False, (
+                    f"No se puede inhabilitar '{row['nombre']}'.\n"
+                    f"Aún tiene {row['cantidad']} unidades en stock.\n"
+                    f"Solo se puede inhabilitar con stock en 0.")
+            self.cursor.execute(
+                "UPDATE productos SET activo=0 WHERE id=%s", (id_producto,))
+            self.connection.commit()
+            return True, f"Producto '{row['nombre']}' inhabilitado correctamente."
+        except Error as e:
+            return False, str(e)
+
+    def habilitar_producto(self, id_producto):
+        try:
+            self.cursor.execute(
+                "SELECT nombre FROM productos WHERE id=%s", (id_producto,))
+            row = self.cursor.fetchone()
+            if not row:
+                return False, "Producto no encontrado"
+            self.cursor.execute(
+                "UPDATE productos SET activo=1 WHERE id=%s", (id_producto,))
+            self.connection.commit()
+            return True, f"Producto '{row['nombre']}' habilitado correctamente."
+        except Error as e:
+            return False, str(e)
+
+    def obtener_productos_inactivos(self):
+        try:
+            self.ping_and_commit()
+            self.cursor.execute(
+                "SELECT * FROM productos WHERE activo=0 ORDER BY nombre")
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def obtener_productos_criticos(self):
+        try:
+            self.cursor.execute("""
+                SELECT id, nombre, cantidad, stock_minimo, proveedor
+                FROM productos
+                WHERE cantidad <= stock_minimo AND activo=1
+                ORDER BY (cantidad - stock_minimo) ASC
+            """)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def obtener_estadisticas(self):
+        try:
+            self.ping_and_commit()
+            stats = {}
+            self.cursor.execute("SELECT COUNT(*) AS n FROM productos WHERE activo=1")
+            stats['total_productos'] = self.cursor.fetchone()['n']
+            self.cursor.execute("SELECT SUM(cantidad) AS s FROM productos WHERE activo=1")
+            stats['stock_total'] = self.cursor.fetchone()['s'] or 0
+            self.cursor.execute(
+                "SELECT SUM(cantidad*precio_unitario) AS v FROM productos WHERE activo=1")
+            r = self.cursor.fetchone()
+            stats['valor_total'] = float(r['v']) if r['v'] else 0.0
+            self.cursor.execute(
+                "SELECT COUNT(*) AS n FROM productos WHERE cantidad<=stock_minimo AND activo=1")
+            stats['bajo_stock'] = self.cursor.fetchone()['n']
+            self.cursor.execute("SELECT COUNT(*) AS n FROM proveedores")
+            stats['total_proveedores'] = self.cursor.fetchone()['n']
+            self.cursor.execute("SELECT COUNT(*) AS n FROM productos WHERE activo=0")
+            stats['productos_inactivos'] = self.cursor.fetchone()['n']
+            return stats
+        except Error as e:
+            print(e); return {}
+        
+    
