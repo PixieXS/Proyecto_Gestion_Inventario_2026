@@ -79,4 +79,119 @@ class UsuariosMixin:
         permisos = usuario.get('permisos', [])
         return 'all' in permisos or permiso in permisos
 
-  
+    # ── CRUD usuarios ─────────────────────────────────────────────────────────
+
+    def obtener_usuarios(self):
+        try:
+            self.cursor.execute("""
+                SELECT u.id, u.username, u.nombre_completo, u.activo,
+                       u.ultimo_login,
+                       r.nombre AS rol, u.fecha_creacion
+                FROM usuarios u JOIN roles r ON u.id_rol = r.id
+                ORDER BY u.id
+            """)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
+
+    def crear_usuario(self, username, password, nombre_completo, id_rol):
+        try:
+            self.cursor.execute("""
+                INSERT INTO usuarios (username, password_hash, nombre_completo, id_rol)
+                VALUES (%s, %s, %s, %s)
+            """, (username, hash_password(password), nombre_completo, id_rol))
+            self.connection.commit()
+            return True, "Usuario creado"
+        except Error as e:
+            return False, str(e)
+
+    def actualizar_usuario(self, id_usuario, nombre_completo, id_rol, activo):
+        try:
+            self.cursor.execute("""
+                UPDATE usuarios SET nombre_completo=%s, id_rol=%s, activo=%s WHERE id=%s
+            """, (nombre_completo, id_rol, activo, id_usuario))
+            self.connection.commit()
+            return True, "Usuario actualizado"
+        except Error as e:
+            return False, str(e)
+
+    def obtener_estado_usuario(self, id_usuario, default=1):
+        try:
+            self.cursor.execute(
+                "SELECT activo FROM usuarios WHERE id=%s", (id_usuario,))
+            row = self.cursor.fetchone()
+            return row['activo'] if row else default
+        except Error:
+            return default
+
+    def cambiar_password(self, id_usuario, password_actual, password_nueva):
+        try:
+            self.cursor.execute(
+                "SELECT password_hash FROM usuarios WHERE id=%s", (id_usuario,))
+            row = self.cursor.fetchone()
+            if not row or not verify_password(password_actual, row['password_hash']):
+                return False, "Contraseña actual incorrecta"
+            return self.actualizar_password_usuario(id_usuario, password_nueva)
+        except Error as e:
+            return False, str(e)
+
+    def reset_password_admin(self, id_usuario, nueva_password):
+        """El administrador resetea la contraseña de otro usuario sin pedir la actual."""
+        ok, msg = self.actualizar_password_usuario(id_usuario, nueva_password)
+        return ok, "Contraseña reseteada exitosamente" if ok else msg
+
+    def eliminar_usuario(self, id_usuario):
+        try:
+            self.cursor.execute("DELETE FROM usuarios WHERE id=%s", (id_usuario,))
+            self.connection.commit()
+            return True, "Usuario eliminado"
+        except Error as e:
+            return False, str(e)
+
+    def contar_movimientos_usuario(self, id_usuario):
+        try:
+            self.cursor.execute(
+                "SELECT COUNT(*) AS n FROM movimientos WHERE id_usuario=%s",
+                (id_usuario,))
+            return self.cursor.fetchone()['n']
+        except Error:
+            return 0
+
+    def contar_logs_usuario(self, id_usuario):
+        try:
+            self.cursor.execute(
+                "SELECT COUNT(*) AS n FROM log_actividad WHERE id_usuario=%s",
+                (id_usuario,))
+            return self.cursor.fetchone()['n']
+        except Error:
+            return 0
+
+    def obtener_resumen_actividad_usuarios(self):
+        try:
+            self.cursor.execute("""
+                SELECT u.id,
+                       u.username,
+                       u.nombre_completo,
+                       u.activo,
+                       u.ultimo_login,
+                       u.fecha_creacion,
+                       r.nombre AS rol,
+                       COALESCE(m.n, 0) AS movimientos,
+                       COALESCE(l.n, 0) AS acciones_log
+                FROM usuarios u
+                JOIN roles r ON u.id_rol = r.id
+                LEFT JOIN (
+                    SELECT id_usuario, COUNT(*) AS n
+                    FROM movimientos
+                    GROUP BY id_usuario
+                ) m ON m.id_usuario = u.id
+                LEFT JOIN (
+                    SELECT id_usuario, COUNT(*) AS n
+                    FROM log_actividad
+                    GROUP BY id_usuario
+                ) l ON l.id_usuario = u.id
+                ORDER BY u.id
+            """)
+            return self.cursor.fetchall()
+        except Error as e:
+            print(e); return []
