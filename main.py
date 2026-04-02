@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 # ── Instalar dependencias automáticamente si faltan ───────────────────────────
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from instalador_deps import instalar_dependencias
 if not instalar_dependencias():
     sys.exit(1)
-# ─────────────────────────────────────────────────────────────────────────────
 
 import tkinter as tk
 from tkinter import messagebox
@@ -18,7 +14,6 @@ from gui.ui_helpers import configurar_ventana
 MAX_INTENTOS = 5
 BLOQUEO_MIN  = 10
 
-# Paleta basada en el logo — azul eléctrico + cyan/turquesa
 IX = {
     # Panel izquierdo — blanco, letras oscuras
     'left_bg':    '#FFFFFF',
@@ -220,8 +215,13 @@ def mostrar_login(root, db):
                             fill=IX['accent'],
                             anchor='center', tags='txt')
 
+        # ── NOMBRE "Inventoryx" pegado ────────────────────────────────────────
         nombre_y = cy2 + 15
+
+        # Calcular posición exacta para pegar "Inventory" + "x"
+        # Usar fuente fija y calcular offset manual
         fuente_bold = ("Segoe UI", 25, "bold")
+        # Crear label temporal para medir
         tmp = tk.Label(dialog, text="Inventory", font=fuente_bold)
         tmp.update_idletasks()
         w_inv = tmp.winfo_reqwidth()
@@ -401,3 +401,90 @@ def mostrar_login(root, db):
 
     root.wait_window(dialog)
     return resultado[0]
+
+
+def main():
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.iconbitmap('app_icon.ico')
+    except Exception:
+        pass
+
+    from configurador import es_primera_instalacion, mostrar_configurador
+
+    # Mostrar configurador si es primera instalación
+    if es_primera_instalacion():
+        ok = mostrar_configurador(root, motivo='primera_instalacion')
+        if not ok:
+            root.destroy(); return
+
+    # Intentar conectar — si falla o BD no existe, abrir configurador
+    def _bd_existe(cfg):
+        """Verifica si la base de datos existe en MySQL."""
+        try:
+            import mysql.connector
+            conn = mysql.connector.connect(
+                host=cfg['host'], port=int(cfg.get('port', 3306)),
+                user=cfg['user'], password=cfg['password'],
+                connection_timeout=5)
+            cursor = conn.cursor()
+            cursor.execute("SHOW DATABASES LIKE %s", (cfg['database'],))
+            existe = cursor.fetchone() is not None
+            cursor.close(); conn.close()
+            return existe
+        except Exception:
+            return False
+
+    import config as _cfg_mod
+    import importlib
+    import database.conexion as _conexion_mod
+
+    def _recargar_config():
+        """Recarga config y sincroniza DB_CONFIG en todos los módulos."""
+        importlib.reload(_cfg_mod)
+        # Sincronizar el DB_CONFIG que conexion.py importó directamente
+        _conexion_mod.DB_CONFIG.update(_cfg_mod.DB_CONFIG)
+
+    intentos = 0
+    while True:
+        # Verificar si la BD existe antes de conectar
+        if not _bd_existe(_cfg_mod.DB_CONFIG):
+            ok = mostrar_configurador(root, motivo='primera_instalacion')
+            if not ok:
+                root.destroy(); return
+            _recargar_config()
+            continue
+
+        db = DatabaseManager()
+        if db.connect():
+            break
+
+        intentos += 1
+        if intentos >= 3:
+            messagebox.showerror("Error",
+                                 "No se pudo conectar tras 3 intentos.\n"
+                                 "Verifique que MySQL esté corriendo.")
+            root.destroy(); return
+        ok = mostrar_configurador(root, motivo='fallo_conexion')
+        if not ok:
+            root.destroy(); return
+        _recargar_config()
+
+    if not db.create_tables():
+        messagebox.showerror("Error", "Error al inicializar las tablas.")
+        root.destroy(); return
+
+    usuario = mostrar_login(root, db)
+    if not usuario:
+        db.disconnect(); root.destroy(); return
+
+    root.deiconify()
+    from gui.app import InventoryManagementApp
+    app = InventoryManagementApp(root, db, usuario)
+    root.protocol("WM_DELETE_WINDOW", app.cerrar)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
