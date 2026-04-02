@@ -678,4 +678,257 @@ class DynamicReportsService:
                 summary[key] = value
         return summary
 
-   
+    def catalog(self):
+        sources = self.source_definitions()
+        return {
+            "sources": {
+                key: {
+                    "key": key,
+                    "label": source["label"],
+                    "description": source["description"],
+                    "row_count": len(source["rows"]),
+                    "fields": [
+                        {
+                            "key": field["key"],
+                            "label": field["label"],
+                            "data_type": field["data_type"],
+                            "format": field.get("format"),
+                            "chart_x": field.get("chart_x"),
+                            "chart_y": field.get("chart_y"),
+                            "default_selected": field.get("default_selected"),
+                            "filter_ops": list(field.get("filter_ops") or []),
+                            "choices": list(field.get("choices") or []),
+                        }
+                        for field in source["fields"]
+                    ],
+                    "default_columns": list(source.get("default_columns") or []),
+                    "default_chart": dict(source.get("default_chart") or {}),
+                    "default_sort_field": source.get("default_sort_field"),
+                }
+                for key, source in sources.items()
+            }
+        }
+
+    def build_chart(self, config):
+        sources = self.source_definitions()
+        source_key = str((config or {}).get("source") or "").strip()
+        source = sources.get(source_key)
+        if not source:
+            raise ValueError("Selecciona una fuente valida para generar el grafico.")
+
+        fields_by_key = source["fields_by_key"]
+        x_field = str((config or {}).get("x_field") or "").strip()
+        y_field = str((config or {}).get("y_field") or "").strip()
+        chart_type = str((config or {}).get("chart_type") or "Barras verticales").strip()
+        aggregation = str((config or {}).get("aggregation") or "Suma").strip()
+        limit = str((config or {}).get("limit") or "Top 10").strip()
+        extra_filters = list((config or {}).get("extra_filters") or [])
+
+        if x_field not in fields_by_key:
+            raise ValueError("Selecciona un campo para el eje X.")
+        if y_field not in fields_by_key:
+            raise ValueError("Selecciona un campo para el eje Y.")
+        if aggregation not in self.AGGREGATIONS:
+            raise ValueError("Selecciona una agregacion valida.")
+
+        x_meta = fields_by_key[x_field]
+        y_meta = fields_by_key[y_field]
+        if not x_meta.get("chart_x"):
+            raise ValueError(f"El campo '{x_meta['label']}' no es adecuado para el eje X.")
+        if not y_meta.get("chart_y"):
+            raise ValueError(f"El campo '{y_meta['label']}' no contiene valores numericos para el eje Y.")
+
+        rows = self.apply_extra_filters(source["rows"], fields_by_key, extra_filters)
+        if not rows:
+            raise ValueError("No hay datos disponibles con los filtros seleccionados.")
+
+        buckets = {}
+        for row in rows:
+            x_value = self._field_value(row, x_meta)
+            x_key = x_value if x_value not in (None, "") else "Sin dato"
+            bucket = buckets.setdefault(
+                x_key,
+                {
+                    "x_raw": x_value,
+                    "x_label": x_value.strftime("%Y-%m-%d") if hasattr(x_value, "strftime") else str(x_key),
+                    "values": [],
+                    "registros": 0,
+                },
+            )
+            bucket["values"].append(_safe_float(self._field_value(row, y_meta)))
+            bucket["registros"] += 1
+
+        def _agg(values):
+            if aggregation == "Promedio":
+                return sum(values) / len(values) if values else 0.0
+            if aggregation == "Maximo":
+                return max(values) if values else 0.0
+            if aggregation == "Minimo":
+                return min(values) if values else 0.0
+            return sum(values)
+
+        series = [
+            {
+                "x_raw": bucket["x_raw"],
+                "x_label": bucket["x_label"],
+                "value": _agg(bucket["values"]),
+                "registros": bucket["registros"],
+            }
+            for bucket in buckets.values()
+        ]
+
+        if chart_type in {"Linea", "Area"}:
+            if x_meta["data_type"] in {"date", "datetime"}:
+                series.sort(key=lambda item: item.get("x_raw") or datetime.min)
+            elif x_meta["data_type"] in {"number", "currency", "percent"}:
+                series.sort(key=lambda item: _safe_float(item.get("x_raw")))
+            else:
+                series.sort(key=lambda item: str(item.get("x_label") or "").lower())
+        else:
+            series.sort(key=lambda item: _safe_float(item.get("value")), reverse=True)
+
+        top_map = {"Top 5": 5, "Top 10": 10, "Top 15": 15, "Top 20": 20}
+        if limit.startswith("Ultimos "):
+            try:
+                count = int("".join(ch for ch in limit if ch.isdigit()))
+            except ValueError:
+                count = 15
+            series = series[-count:]
+        elif limit in top_map:
+            series = series[: top_map[limit]]
+
+        if chart_type in {"Pastel", "Dona"}:
+            series = [item for item in series if _safe_float(item.get("value")) > 0]
+            if not series:
+                raise ValueError("Los graficos circulares necesitan valores positivos en el eje Y.")
+
+        filters_text = []
+        for item in extra_filters:
+            field = fields_by_key.get(item.get("field")) or {}
+            filters_text.append(f"{field.get('label') or item.get('field')}: {item.get('operator')} {item.get('value')}")
+
+        return {
+            "source_key": source_key,
+            "source_label": source["label"],
+            "chart_type": chart_type,
+            "x_label": x_meta["label"],
+            "y_label": f"{aggregation} de {y_meta['label']}",
+            "y_format": y_meta.get("format") or "number",
+            "series": series,
+            "summary": {
+                "Filas analizadas": len(rows),
+                "Puntos visibles": len(series),
+                "Total eje Y": sum(_safe_float(item.get("value")) for item in series),
+            },
+            "preview_columns": ["Dimension", "Valor", "Registros"],
+            "preview_rows": [{"Dimension": item["x_label"], "Valor": item["value"], "Registros": item["registros"]} for item in series],
+            "preview_formats": {"Valor": y_meta.get("format") or "number", "Registros": "number"},
+            "title": f"{source['label']} por {x_meta['label']}",
+            "subtitle": f"{chart_type} con {aggregation.lower()} de {y_meta['label'].lower()}.",
+            "filters_export": self.export_filters_summary(
+                source,
+                extra_filters=filters_text,
+                extra_pairs=[("Eje X", x_meta["label"]), ("Eje Y", y_meta["label"]), ("Agregacion", aggregation), ("Grafico", chart_type)],
+            ),
+        }
+
+    def build_report(self, config):
+        sources = self.source_definitions()
+        source_key = str((config or {}).get("source") or "").strip()
+        source = sources.get(source_key)
+        if not source:
+            raise ValueError("Selecciona una fuente valida para construir el reporte.")
+
+        fields_by_key = source["fields_by_key"]
+        columns = [col for col in (config or {}).get("columns") or [] if col in fields_by_key]
+        if not columns:
+            raise ValueError("Selecciona al menos una columna para el reporte personalizado.")
+
+        sort_field = str((config or {}).get("sort_field") or "").strip() or source.get("default_sort_field")
+        sort_direction = str((config or {}).get("sort_direction") or "desc").strip().lower()
+        include_summary = bool((config or {}).get("include_summary", True))
+        include_totals = bool((config or {}).get("include_totals"))
+        include_subtotals = bool((config or {}).get("include_subtotals"))
+        subtotal_field = str((config or {}).get("subtotal_field") or "").strip()
+        extra_filters = list((config or {}).get("extra_filters") or [])
+
+        rows = self.apply_extra_filters(source["rows"], fields_by_key, extra_filters)
+        rows = self.sort_rows(rows, sort_field, sort_direction, fields_by_key)
+
+        labels = [fields_by_key[col]["label"] for col in columns]
+        formats = {fields_by_key[col]["label"]: fields_by_key[col].get("format") for col in columns if fields_by_key[col].get("format")}
+        numeric_cols = [col for col in columns if fields_by_key[col]["data_type"] in {"number", "currency", "percent"}]
+
+        def _render_row(raw_row):
+            return {fields_by_key[col]["label"]: self._field_value(raw_row, fields_by_key[col]) for col in columns}
+
+        rendered_rows = [_render_row(row) for row in rows]
+
+        if include_subtotals and subtotal_field in fields_by_key and rows:
+            grouped_rows = []
+            current_group = None
+            totals = {col: 0.0 for col in numeric_cols}
+            for raw_row in rows:
+                group_value = str(self._field_value(raw_row, fields_by_key[subtotal_field]) or "Sin dato")
+                if current_group is None:
+                    current_group = group_value
+                if group_value != current_group:
+                    subtotal_row = {label: "" for label in labels}
+                    subtotal_row[labels[0]] = f"Subtotal - {current_group}"
+                    for col in numeric_cols:
+                        subtotal_row[fields_by_key[col]["label"]] = totals[col]
+                    grouped_rows.append(subtotal_row)
+                    totals = {col: 0.0 for col in numeric_cols}
+                    current_group = group_value
+                grouped_rows.append(_render_row(raw_row))
+                for col in numeric_cols:
+                    totals[col] += _safe_float(self._field_value(raw_row, fields_by_key[col]))
+            subtotal_row = {label: "" for label in labels}
+            subtotal_row[labels[0]] = f"Subtotal - {current_group}"
+            for col in numeric_cols:
+                subtotal_row[fields_by_key[col]["label"]] = totals[col]
+            grouped_rows.append(subtotal_row)
+            rendered_rows = grouped_rows
+
+        if include_totals and numeric_cols:
+            total_row = {label: "" for label in labels}
+            total_row[labels[0]] = "TOTAL GENERAL"
+            for col in numeric_cols:
+                total_row[fields_by_key[col]["label"]] = sum(_safe_float(self._field_value(row, fields_by_key[col])) for row in rows)
+            rendered_rows.append(total_row)
+
+        summary = {}
+        if include_summary:
+            summary["Fuente"] = source["label"]
+            summary["Registros base"] = len(rows)
+            summary["Columnas visibles"] = len(columns)
+            if sort_field in fields_by_key:
+                summary["Ordenado por"] = f"{fields_by_key[sort_field]['label']} ({'DESC' if sort_direction == 'desc' else 'ASC'})"
+            for col in numeric_cols[:4]:
+                summary[f"Total {fields_by_key[col]['label']}"] = sum(_safe_float(self._field_value(row, fields_by_key[col])) for row in rows)
+
+        filters_text = []
+        for item in extra_filters:
+            field = fields_by_key.get(item.get("field")) or {}
+            filters_text.append(f"{field.get('label') or item.get('field')}: {item.get('operator')} {item.get('value')}")
+
+        report = self.owner._base_reporte(
+            "reporte_personalizado",
+            f"Reporte personalizado - {source['label']}",
+            source["description"],
+            labels,
+            rendered_rows,
+            formatos=formats,
+            resumen=summary,
+        )
+        report["source_key"] = source_key
+        report["selected_columns"] = list(columns)
+        report["filters_export"] = self.export_filters_summary(
+            source,
+            extra_filters=filters_text,
+            extra_pairs=[
+                ("Columnas", ", ".join(labels)),
+                ("Subtotales", fields_by_key[subtotal_field]["label"] if include_subtotals and subtotal_field in fields_by_key else "No"),
+            ],
+        )
+        return report
