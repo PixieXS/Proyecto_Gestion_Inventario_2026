@@ -107,7 +107,7 @@ La interfaz esta pensada para trabajar de forma practica:
 
 ## Documentacion disponible
 
-- [manual_usuario.pdf](Inventoryx/manual_usuario.pdf): manual de usuario actualizado con el flujo real del sistema.
+- [manual_usuario.pdf](manual_usuario.pdf): manual de usuario actualizado con el flujo real del sistema.
 
 ## Inventoryx en una frase
 
