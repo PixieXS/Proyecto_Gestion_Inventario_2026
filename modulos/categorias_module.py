@@ -58,4 +58,105 @@ class CategoriasWindow:
         bloquear_columnas(self.tree)
         self.tree.bind('<<TreeviewSelect>>', self._seleccionar)
 
-     
+        # ── Formulario ────────────────────────────────────────────────────────
+        frm_f = ttk.LabelFrame(self.win, text="Datos", padding=10)
+        frm_f.pack(fill=tk.X, padx=16, pady=(0, 6))
+
+        ttk.Label(frm_f, text="Nombre:").grid(     row=0, column=0, sticky='e', padx=6, pady=4)
+        self.e_nombre = ttk.Entry(frm_f, width=30)
+        self.e_nombre.grid(row=0, column=1, pady=4, sticky='w')
+
+        ttk.Label(frm_f, text="Descripción:").grid(row=1, column=0, sticky='e', padx=6, pady=4)
+        self.e_desc = ttk.Entry(frm_f, width=30)
+        self.e_desc.grid(row=1, column=1, pady=4, sticky='w')
+
+        # ── Botones ───────────────────────────────────────────────────────────
+        frm_b = ttk.Frame(self.win); frm_b.pack(pady=8)
+
+        ttk.Button(frm_b, text="➕ Crear",
+                   command=self._crear,
+                   style='Create.TButton').pack(side=tk.LEFT, padx=4)
+        ttk.Button(frm_b, text="✏️ Actualizar",
+                   command=self._actualizar,
+                   style='Update.TButton').pack(side=tk.LEFT, padx=4)
+        ttk.Button(frm_b, text="🗑️ Eliminar",
+                   command=self._eliminar,
+                   style='Delete.TButton').pack(side=tk.LEFT, padx=4)
+        ttk.Button(frm_b, text="🔄 Limpiar",
+                   command=self._limpiar,
+                   style='Neutral.TButton').pack(side=tk.LEFT, padx=4)
+
+    def _cargar(self):
+        for r in self.tree.get_children(): self.tree.delete(r)
+        for c in self.db.obtener_categorias():
+            n_prod = self.db.contar_productos_activos_por_categoria(c['nombre'])
+            tag = 'con_productos' if n_prod and n_prod > 0 else 'sin_productos'
+            self.tree.insert('', tk.END, tags=(tag,), values=(
+                c['id'], c['nombre'], c.get('descripcion', '') or '', n_prod))
+
+    def _seleccionar(self, event=None):
+        sel = self.tree.selection()
+        if not sel: return
+        vals = self.tree.item(sel[0])['values']
+        self._id_sel = vals[0]
+        self.e_nombre.delete(0, tk.END); self.e_nombre.insert(0, vals[1])
+        self.e_desc.delete(0, tk.END);   self.e_desc.insert(0, vals[2] or '')
+
+    def _crear(self):
+        nombre = self.e_nombre.get().strip()
+        if not nombre:
+            messagebox.showwarning("⚠️", "El nombre es requerido.", parent=self.win); return
+        ok, msg = self.db.crear_categoria(nombre, self.e_desc.get().strip())
+        messagebox.showinfo("✅", msg, parent=self.win) if ok \
+            else messagebox.showerror("❌", msg, parent=self.win)
+        if ok: self._limpiar(); self._cargar()
+
+    def _actualizar(self):
+        if not self._id_sel:
+            messagebox.showwarning("⚠️", "Seleccione una categoría de la tabla.", parent=self.win); return
+        nombre = self.e_nombre.get().strip()
+        if not nombre:
+            messagebox.showwarning("⚠️", "El nombre es requerido.", parent=self.win); return
+        ok, msg = self.db.actualizar_categoria(self._id_sel, nombre, self.e_desc.get().strip())
+        messagebox.showinfo("✅", msg, parent=self.win) if ok \
+            else messagebox.showerror("❌", msg, parent=self.win)
+        if ok: self._limpiar(); self._cargar()
+
+    def _eliminar(self):
+        if not self._id_sel:
+            messagebox.showwarning("⚠️", "Seleccione una categoría.", parent=self.win); return
+        nombre = self.e_nombre.get().strip()
+
+        # Primera confirmación normal
+        if not messagebox.askyesno("🗑️ Eliminar categoría",
+                                   f"¿Eliminar la categoría '{nombre}'?\n\n"
+                                   f"Esta acción es permanente e irreversible.\n"
+                                   f"Solo es posible si ningún producto la usa.",
+                                   parent=self.win):
+            return
+
+        # Segunda confirmación — contraseña
+        autorizado = confirmar_con_password(
+            self.win, self.db, self.usuario['id'],
+            "🔒 Confirmar eliminación",
+            f"Para eliminar '{nombre}' ingrese\nsu contraseña de acceso al sistema.")
+
+        if not autorizado:
+            return
+
+        ok, msg = self.db.eliminar_categoria(self._id_sel)
+        if ok:
+            self.db.registrar_log(
+                self.usuario['id'], self.usuario['username'],
+                'Eliminar categoría', f"Categoría: {nombre}")
+            messagebox.showinfo("✅", msg, parent=self.win)
+            self._limpiar(); self._cargar()
+        else:
+            messagebox.showerror("❌ No se puede eliminar", msg, parent=self.win)
+
+    def _limpiar(self):
+        self._id_sel = None
+        self.e_nombre.delete(0, tk.END)
+        self.e_desc.delete(0, tk.END)
+        if self.tree.selection():
+            self.tree.selection_remove(self.tree.selection())
