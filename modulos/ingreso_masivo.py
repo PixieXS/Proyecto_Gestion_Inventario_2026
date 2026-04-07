@@ -279,4 +279,232 @@ class IngresoMasivoWindow:
         n = len(self._filas)
         self.lbl_info.config(text=f"{n} fila(s)")
 
-  
+    # ── Guardar ───────────────────────────────────────────────────────────────
+
+    def _guardar(self):
+        if not self._filas:
+            messagebox.showwarning("⚠️", "No hay filas para guardar.",
+                                   parent=self.win); return
+
+        # ── Validar y recolectar ──────────────────────────────────────────────
+        productos_ok   = []
+        errores        = []
+        vistos_codigo  = {}
+        vistos_nombre  = {}
+
+        for i, vars_ in enumerate(self._filas):
+            fila_n  = i + 1
+            codigo  = vars_['codigo'].get().strip()   or None
+            nombre  = vars_['nombre'].get().strip()
+            desc    = vars_['descripcion'].get().strip()
+            prov    = vars_['proveedor'].get().strip()
+            cat     = vars_['categoria'].get().strip() or 'General'
+
+            # Fila completamente vacía → saltar silenciosamente
+            todos_vacios = all(
+                vars_[k].get().strip() == ''
+                for k in ('codigo','nombre','descripcion',
+                          'cantidad','precio','stock_min',
+                          'proveedor','categoria'))
+            if todos_vacios:
+                continue
+
+            # Nombre obligatorio
+            if not nombre:
+                errores.append((fila_n, "Nombre vacío"))
+                continue
+
+            # Precio obligatorio y numérico
+            try:
+                precio = float(vars_['precio'].get().strip())
+                if precio < 0: raise ValueError
+            except (ValueError, TypeError):
+                errores.append((fila_n, f"'{nombre}' — Precio inválido"))
+                continue
+
+            # Cantidad numérica
+            try:
+                cantidad = int(float(vars_['cantidad'].get().strip() or '0'))
+                if cantidad < 0: raise ValueError
+            except (ValueError, TypeError):
+                errores.append((fila_n, f"'{nombre}' — Cantidad inválida"))
+                continue
+
+            # Stock mínimo
+            try:
+                stock_min = int(float(vars_['stock_min'].get().strip() or '5'))
+            except (ValueError, TypeError):
+                stock_min = 5
+
+            # Duplicado interno por código
+            if codigo and codigo in vistos_codigo:
+                errores.append((fila_n,
+                    f"'{nombre}' — Código '{codigo}' duplicado "
+                    f"(ya en fila {vistos_codigo[codigo]})"))
+                continue
+            if codigo:
+                vistos_codigo[codigo] = fila_n
+
+            # Duplicado interno por nombre
+            if nombre in vistos_nombre:
+                errores.append((fila_n,
+                    f"'{nombre}' — Nombre duplicado "
+                    f"(ya en fila {vistos_nombre[nombre]})"))
+                continue
+            vistos_nombre[nombre] = fila_n
+
+            # Duplicado en BD
+            dup_bd = False
+            if codigo:
+                self.db.cursor.execute(
+                    "SELECT id FROM productos WHERE codigo=%s AND activo=1",
+                    (codigo,))
+                if self.db.cursor.fetchone():
+                    errores.append((fila_n,
+                        f"'{nombre}' — Código '{codigo}' ya existe en la BD"))
+                    dup_bd = True
+            if not dup_bd:
+                self.db.cursor.execute(
+                    "SELECT id FROM productos WHERE nombre=%s AND activo=1",
+                    (nombre,))
+                if self.db.cursor.fetchone():
+                    errores.append((fila_n,
+                        f"'{nombre}' — Ya existe en la BD con ese nombre"))
+                    dup_bd = True
+
+            if not dup_bd:
+                productos_ok.append({
+                    'codigo':   codigo,
+                    'nombre':   nombre,
+                    'desc':     desc,
+                    'cantidad': cantidad,
+                    'precio':   precio,
+                    'prov':     prov,
+                    'cat':      cat,
+                    'stk_min':  stock_min,
+                })
+
+        if not productos_ok and not errores:
+            messagebox.showwarning("⚠️", "No hay datos para guardar.",
+                                   parent=self.win); return
+
+        if not productos_ok:
+            # Solo errores — mostrar resumen y no cerrar
+            self._mostrar_resumen(0, errores)
+            return
+
+        # Confirmar si hay errores mezclados con válidos
+        if errores:
+            if not messagebox.askyesno(
+                    "⚠️ Hay filas con errores",
+                    f"Se guardarán {len(productos_ok)} producto(s) válido(s).\n"
+                    f"Se ignorarán {len(errores)} fila(s) con errores.\n\n"
+                    f"¿Continuar?",
+                    parent=self.win):
+                return
+
+        # ── Insertar en BD ────────────────────────────────────────────────────
+        insertados = 0
+        for p in productos_ok:
+            try:
+                # Resolver proveedor
+                id_prov = None
+                if p['prov']:
+                    self.db.cursor.execute(
+                        "SELECT id FROM proveedores WHERE nombre=%s", (p['prov'],))
+                    row = self.db.cursor.fetchone()
+                    id_prov = row['id'] if row else None
+
+                # Crear categoría si no existe
+                if p['cat']:
+                    self.db.cursor.execute(
+                        "INSERT IGNORE INTO categorias (nombre) VALUES (%s)",
+                        (p['cat'],))
+
+                self.db.cursor.execute("""
+                    INSERT INTO productos
+                    (nombre, codigo, descripcion, cantidad, precio_unitario,
+                     proveedor, id_proveedor, categoria, stock_minimo, activo)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+                """, (p['nombre'], p['codigo'], p['desc'],
+                      p['cantidad'], p['precio'], p['prov'],
+                      id_prov, p['cat'], p['stk_min']))
+                insertados += 1
+            except Exception as e:
+                errores.append(('BD', str(e)))
+
+        if insertados > 0:
+            self.db.connection.commit()
+            self.db.registrar_log(
+                self.usuario['id'], self.usuario['username'],
+                'Ingreso masivo manual',
+                f'{insertados} productos insertados')
+
+        self._mostrar_resumen(insertados, errores)
+
+        if insertados > 0 and not errores:
+            self._cerrar()
+
+    def _mostrar_resumen(self, insertados, errores):
+        """Ventana de resumen de resultados."""
+        win = tk.Toplevel(self.win)
+        win.title("📊 Resultado")
+        win.configure(bg='#F1F5F9')
+        win.grab_set()
+        configurar_ventana(win, width=620, height=460, min_width=620, min_height=460, resizable=(False, False))
+
+        # Encabezado de resultado
+        color_hdr = '#065F46' if insertados > 0 else '#991B1B'
+        hdr = tk.Frame(win, bg=color_hdr, height=46)
+        hdr.pack(fill=tk.X); hdr.pack_propagate(False)
+        tk.Label(hdr,
+                 text=f"{'✅' if insertados > 0 else '❌'}  "
+                      f"{insertados} producto(s) guardado(s)",
+                 font=("Segoe UI", 12, "bold"),
+                 bg=color_hdr, fg='white').pack(side=tk.LEFT, padx=14)
+
+        body = tk.Frame(win, bg='#F1F5F9')
+        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+
+        if insertados > 0:
+            tk.Label(body,
+                     text=f"✅  {insertados} producto(s) agregado(s) exitosamente.",
+                     font=("Segoe UI", 10),
+                     bg='#F0FDF4', fg='#065F46',
+                     pady=8, padx=10).pack(fill=tk.X, pady=(0, 8))
+
+        if errores:
+            tk.Label(body,
+                     text=f"⚠️  {len(errores)} fila(s) con problemas:",
+                     font=("Segoe UI", 9, "bold"),
+                     bg='#F1F5F9', fg='#991B1B').pack(anchor='w', pady=(0, 4))
+
+            frm = ttk.Frame(body); frm.pack(fill=tk.BOTH, expand=True)
+            sb  = ttk.Scrollbar(frm); sb.pack(side=tk.RIGHT, fill=tk.Y)
+            cols = ('Fila', 'Problema')
+            tree = ttk.Treeview(frm, columns=cols, show='headings',
+                                 yscrollcommand=sb.set, height=10)
+            sb.config(command=tree.yview)
+            tree.heading('Fila',     text='Fila');    tree.column('Fila',    width=55,  anchor='center')
+            tree.heading('Problema', text='Problema');tree.column('Problema',width=390, anchor='w')
+            tree.tag_configure('err', background='#FEF2F2')
+            for fila, msg in errores:
+                tree.insert('', tk.END, tags=('err',), values=(fila, msg))
+            tree.pack(fill=tk.BOTH, expand=True)
+            bloquear_columnas(tree)
+
+        frm_b = ttk.Frame(win); frm_b.pack(pady=10)
+        if insertados > 0 and errores:
+            ttk.Button(frm_b, text="Corregir errores",
+                       command=win.destroy,
+                       style='Neutral.TButton').pack(side=tk.LEFT, padx=6)
+        ttk.Button(frm_b, text="Cerrar",
+                   command=lambda: (win.destroy(),
+                                    self._cerrar() if not errores else None),
+                   style='Create.TButton').pack(side=tk.LEFT, padx=6)
+
+    def _cerrar(self):
+        self.canvas.unbind_all('<MouseWheel>')
+        if self.on_close:
+            self.on_close()
+        self.win.destroy()
