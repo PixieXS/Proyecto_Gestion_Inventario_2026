@@ -243,4 +243,260 @@ class ImportarExcelWindow:
         self.tree_prob.pack(fill=tk.BOTH, expand=True)
         bloquear_columnas(self.tree_prob)
 
-  
+    # ── Plantilla ─────────────────────────────────────────────────────────────
+
+    def _descargar_plantilla(self):
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            ruta = filedialog.asksaveasfilename(
+                parent=self.win,
+                defaultextension='.xlsx',
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile="plantilla_importar_productos.xlsx")
+            if not ruta: return
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Productos"
+
+            fill   = PatternFill("solid", fgColor="1f4788")
+            fuente = Font(bold=True, color="FFFFFF")
+            for ci, col in enumerate(self.COLUMNAS, 1):
+                cell = ws.cell(row=1, column=ci, value=col)
+                cell.fill = fill; cell.font = fuente
+                cell.alignment = Alignment(horizontal='center')
+            # Dos filas de ejemplo
+            ejemplos = self._ejemplos_plantilla()
+            for ri, ej in enumerate(ejemplos, 2):
+                for ci, col in enumerate(self.COLUMNAS, 1):
+                    ws.cell(row=ri, column=ci, value=ej.get(col, ''))
+
+            # Nota en fila 5
+            ws.cell(row=5, column=1,
+                    value="* codigo: opcional pero recomendado para evitar duplicados. "
+                          "nombre y precio_unitario son obligatorios. Los campos opcionales activos "
+                          "se incluyen automáticamente en esta plantilla.")
+            ws.cell(row=5, column=1).font = Font(italic=True, color='888888')
+
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = 22
+            wb.save(ruta)
+            messagebox.showinfo("✅", f"Plantilla guardada en:\n{ruta}", parent=self.win)
+        except Exception as e:
+            messagebox.showerror("❌ Error", str(e), parent=self.win)
+
+    # ── Cargar y validar ──────────────────────────────────────────────────────
+
+    def _cargar_archivo(self):
+        ruta = filedialog.askopenfilename(
+            parent=self.win,
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Todos", "*.*")])
+        if not ruta: return
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(ruta, data_only=True)
+            ws = wb.active
+
+            headers = [
+                self._mapear_cabecera(ws.cell(1, c).value)
+                for c in range(1, ws.max_column + 1)
+            ]
+
+            # Validar columnas mínimas
+            if 'nombre' not in headers and 'codigo' not in headers:
+                messagebox.showerror(
+                    "❌ Formato incorrecto",
+                    "El archivo debe tener al menos las columnas:\n"
+                    "  nombre  y  precio_unitario\n\n"
+                    "Descarga la plantilla para ver el formato correcto.",
+                    parent=self.win)
+                return
+            if 'precio_unitario' not in headers:
+                messagebox.showerror(
+                    "❌ Falta columna",
+                    "No se encontró la columna 'precio_unitario'.",
+                    parent=self.win)
+                return
+
+            # Leer todas las filas
+            filas_raw = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not any(v for v in row if v is not None and str(v).strip()):
+                    continue
+                fila = {}
+                for ci, h in enumerate(headers):
+                    if h:
+                        valor = row[ci] if ci < len(row) else ''
+                        fila[h] = self._normalizar_valor_excel(valor)
+                filas_raw.append(fila)
+
+        except Exception as e:
+            messagebox.showerror("❌ Error al leer el archivo", str(e), parent=self.win)
+            return
+
+        # ── Validar y detectar problemas ──────────────────────────────────────
+        self._datos     = []
+        self._problemas = []
+
+        vistos_codigo = {}   # codigo → primera fila que lo usó
+        vistos_nombre = {}   # nombre → primera fila que lo usó
+
+        for i, fila in enumerate(filas_raw, start=2):
+            nombre = str(fila.get('nombre', '') or '').strip()
+            codigo = str(fila.get('codigo', '') or '').strip()
+
+            # Validar nombre
+            if not nombre and not codigo:
+                self._problemas.append((i, '❌ Error', 'Fila sin nombre ni código — se omitirá'))
+                continue
+            if not nombre:
+                nombre = f"(sin nombre — código: {codigo})"
+
+            # Validar precio
+            try:
+                precio = float(fila.get('precio_unitario', 0) or 0)
+                if precio < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                self._problemas.append((i, '❌ Error',
+                    f"'{nombre}' — precio_unitario inválido: "
+                    f"'{fila.get('precio_unitario', '')}'. Se omitirá."))
+                continue
+
+            # Validar cantidad
+            try:
+                cant = int(float(fila.get('cantidad', 0) or 0))
+                if cant < 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                self._problemas.append((i, '⚠️ Aviso',
+                    f"'{nombre}' — cantidad inválida, se usará 0."))
+                fila['cantidad'] = 0
+
+            # Detectar duplicados dentro del Excel
+            dup_en_excel = False
+            if codigo and codigo in vistos_codigo:
+                self._problemas.append((i, '⚠️ Dup. en Excel',
+                    f"Código '{codigo}' ya aparece en fila {vistos_codigo[codigo]}. "
+                    f"Se omitirá esta fila."))
+                dup_en_excel = True
+            elif codigo:
+                vistos_codigo[codigo] = i
+
+            if nombre in vistos_nombre and not dup_en_excel:
+                self._problemas.append((i, '⚠️ Dup. en Excel',
+                    f"Nombre '{nombre}' ya aparece en fila {vistos_nombre[nombre]}. "
+                    f"Se omitirá esta fila."))
+                dup_en_excel = True
+            elif nombre not in vistos_nombre:
+                vistos_nombre[nombre] = i
+
+            if dup_en_excel:
+                continue
+
+            self._datos.append(fila)
+
+        # ── Poblar previsualización ───────────────────────────────────────────
+        for r in self.tree.get_children():
+            self.tree.delete(r)
+        for r in self.tree_prob.get_children():
+            self.tree_prob.delete(r)
+
+        nombres_con_prob = {
+            str(p.get('nombre', '') or '').strip()
+            for _, tip, det in self._problemas
+            for p in [{}] if 'Dup' in tip
+        }
+
+        for p in self._datos[:50]:
+            n   = str(p.get('nombre', '') or '').strip()
+            tag = 'dup_excel' if n in nombres_con_prob else 'ok'
+            self.tree.insert('', tk.END, tags=(tag,),
+                             values=[p.get(c, '') for c in self.COLUMNAS])
+
+        for fila_n, tipo, detalle in self._problemas:
+            tag = 'error' if '❌' in tipo else 'warn'
+            self.tree_prob.insert('', tk.END, tags=(tag,),
+                                   values=(fila_n, tipo, detalle))
+
+        # Actualizar pestaña de problemas
+        n_prob = len(self._problemas)
+        self.nb.tab(self.tab_prob,
+                    text=f"⚠️ Problemas detectados ({n_prob})")
+        if n_prob > 0:
+            self.nb.select(self.tab_prob)   # abrir pestaña si hay problemas
+
+        nombre_archivo = os.path.basename(ruta)
+        self.lbl_archivo.config(text=f"✅  {nombre_archivo}", foreground='#065F46')
+
+        total    = len(self._datos)
+        omitidos = len([p for _, t, _ in self._problemas if 'Dup' in t or '❌' in t])
+        txt = f"  {total} producto(s) listos para importar"
+        if omitidos:
+            txt += f"  |  {omitidos} fila(s) con problemas (ver pestaña ⚠️)"
+        self.lbl_conteo.config(text=txt)
+        self.btn_importar.config(state='normal' if total > 0 else 'disabled')
+
+    # ── Importar ──────────────────────────────────────────────────────────────
+
+    def _importar(self):
+        if not self._datos:
+            messagebox.showwarning("⚠️", "No hay datos válidos para importar.",
+                                   parent=self.win); return
+
+        n_prob = len(self._problemas)
+        aviso  = ""
+        if n_prob:
+            aviso = (f"\n\n⚠️ Hay {n_prob} problema(s) detectado(s) en el archivo.\n"
+                     f"Solo se importarán las filas válidas.")
+
+        if not messagebox.askyesno(
+                "📥 Confirmar importación",
+                f"¿Importar {len(self._datos)} producto(s)?\n\n"
+                f"• Productos nuevos → se insertarán\n"
+                f"• Duplicados en BD (por código o nombre) → se ignorarán"
+                f"{aviso}",
+                parent=self.win):
+            return
+
+        # Contar antes para calcular cuántos son nuevos
+        self._cats_antes = self.db.contar_categorias()
+        self._provs_antes = self.db.contar_proveedores()
+
+        insertados, actualizados, omitidos, errores = self.db.importar_productos_excel(
+            self._datos, modo_duplicados='saltar')
+
+        # Contar categorías y proveedores nuevos para el resumen
+        cats_antes   = getattr(self, '_cats_antes',   0)
+        provs_antes  = getattr(self, '_provs_antes',  0)
+        cats_ahora = self.db.contar_categorias()
+        provs_ahora = self.db.contar_proveedores()
+        cats_nuevas = max(0, cats_ahora - cats_antes)
+        provs_nuevos = max(0, provs_ahora - provs_antes)
+
+        self.db.registrar_log(
+            self.usuario['id'], self.usuario['username'],
+            'Importar productos Excel',
+            f'{insertados} nuevos, {omitidos} omitidos, {len(errores)} errores')
+
+        resumen = f"✅ {insertados} producto(s) nuevos agregados al inventario."
+        if omitidos:
+            resumen += (f"\n⏭️ {omitidos} ya existían en la BD — ignorados.")
+        if cats_nuevas:
+            resumen += f"\n🏷️ {cats_nuevas} categoría(s) nueva(s) creadas automáticamente."
+        if provs_nuevos:
+            resumen += (f"\n🏭 {provs_nuevos} proveedor(es) nuevo(s) creados automáticamente."
+                        f"\n   Completa sus datos en Administración → Gestionar Proveedores.")
+        if errores:
+            resumen += f"\n\n❌ {len(errores)} fila(s) con error de inserción:"
+            for fila, msg in errores[:8]:
+                resumen += f"\n  • Fila {fila}: {msg}"
+            if len(errores) > 8:
+                resumen += f"\n  ... y {len(errores) - 8} más"
+
+        messagebox.showinfo("📥 Resultado", resumen, parent=self.win)
+        if insertados > 0:
+            self.win.destroy()
